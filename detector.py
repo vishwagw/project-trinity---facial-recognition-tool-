@@ -1,11 +1,35 @@
+import argparse
 import pickle
 from collections import Counter
 from pathlib import Path
 
-import face_recognition 
+import face_recognition
+from PIL import Image, ImageDraw
 
 
 DEFAULT_ENCODINGS_PATH = Path('output/encodings.pk1')
+BOUNDING_BOX_COLOR = "blue"
+TEXT_COLOR = "white"
+
+parser = argparse.ArgumentParser(description="Recognize faces in an image")
+parser.add_argument("--train", action="store_true", help="Train on input data")
+parser.add_argument(
+    "--validate", action="store_true", help="Validate trained model"
+)
+parser.add_argument(
+    "--test", action="store_true", help="Test the model with an unknown image"
+)
+parser.add_argument(
+    "-m",
+    action="store",
+    default="hog",
+    choices=["hog", "cnn"],
+    help="Which model to use for training: hog (CPU), cnn (GPU)",
+)
+parser.add_argument(
+    "-f", action="store", help="Path to an image with an unknown face"
+)
+args = parser.parse_args()
 
 Path('training').mkdir(exist_ok=True)
 Path('output').mkdir(exist_ok=True)
@@ -47,12 +71,20 @@ def recognize_faces(
 
     input_face_locations = face_recognition.face_locations(input_image, model=model)
     input_face_encodings = face_recognition.face_encodings(input_image, input_face_locations)
+
+    pillow_image = Image.fromarray(input_image)
+    draw = ImageDraw.Draw(pillow_image)
     
     for bounding_box, unknown_encoding in zip(input_face_locations, input_face_encodings):
         name = _recognize_face(unknown_encoding, loaded_encodings)
         if not name:
             name = 'Unknown'
-        print(name, bounding_box)
+        #print(name, bounding_box)
+        _display_face(draw, bounding_box, name)
+
+    del draw
+    pillow_image.show()
+
 
 def _recognize_face(unknown_encoding, loaded_encodings):
     boolean_matches = face_recognition.compare_faces(
@@ -66,10 +98,42 @@ def _recognize_face(unknown_encoding, loaded_encodings):
     if votes:
         return votes.most_common(1)[0][0]
     
-recognize_faces('unknown.jpg')
 
+def _display_face(draw, bounding_box, name):
+    top, right, bottom, left = bounding_box
+    draw.rectangle(((left, top),(right, bottom)), outline=BOUNDING_BOX_COLOR)
+    text_left, text_top, text_right, text_bottom = draw.textbbox(
+        (left, bottom), name 
+    )
+    draw.rectangle(
+        ((text_left, text_top), (text_right, text_bottom)),
+        fill = 'blue',
+        outline = 'blue',
+    )
+    draw.text(
+        (text_left, text_top),
+        name,
+        fill='white',
+    )
 
+def validate(model: str = 'hog'):
+    for filepath in Path('validation').rglob("*"):
+        if filepath.is_file():
+            recognize_faces(
+                image_location=str(filepath.absolute()), model=model 
+            )
+
+#validate()
+#recognize_faces('unknown.jpg')
 #Removed encode_known_faces()
+
+if __name__ == '_main_':
+    if args.train:
+        encode_known_faces(model=args.m)
+    if args.validate:
+        validate(model=args.m)
+    if args.test:
+        recognize_faces(images_location=args.f, model=args.m)
 
 
 
